@@ -16,6 +16,10 @@ const supportedExtensions = new Map([
 
 const ignoredDirectories = new Set([
   ".git",
+  ".ipynb_checkpoints",
+  ".mypy_cache",
+  ".ruff_cache",
+  "vendor",
   ".github",
   ".next",
   ".turbo",
@@ -34,7 +38,8 @@ const maxFileBytes = 180_000;
 
 export async function analyzeRepository(root, context = {}) {
   const repository = context.repository || { owner: "local", name: "repository", url: "" };
-  const files = await collectSupportedFiles(root);
+  const { files, skipped } = await collectSupportedFiles(root);
+  skipped.push(...files.slice(maxFiles).map((file) => ({ path: file.path, reason: "120-file review limit" })));
   const analyzedFiles = [];
 
   for (const file of files.slice(0, maxFiles)) {
@@ -59,6 +64,7 @@ export async function analyzeRepository(root, context = {}) {
   return {
     id: cryptoRandomId(),
     repository,
+    scope: { skipped, limits: { maxFiles, maxFileBytes }, scoreNote: "Heuristic based on detected findings and test-file presence; not a security guarantee or test coverage measurement." },
     reviewedAt: new Date().toISOString(),
     summary,
     insights,
@@ -72,6 +78,7 @@ export async function analyzeRepository(root, context = {}) {
 
 async function collectSupportedFiles(root) {
   const results = [];
+  const skipped = [];
 
   async function walk(directory) {
     const entries = await readdir(directory, { withFileTypes: true });
@@ -79,16 +86,28 @@ async function collectSupportedFiles(root) {
       if (entry.isDirectory()) {
         if (!ignoredDirectories.has(entry.name)) {
           await walk(join(directory, entry.name));
+        } else {
+          skipped.push({ path: relative(root, join(directory, entry.name)) + "/", reason: "Generated, dependency, or excluded directory (contents not scanned)" });
         }
         continue;
       }
 
       const extension = getSupportedExtension(entry.name);
-      if (!extension) continue;
+      if (!entry.isFile()) {
+        skipped.push({ path: relative(root, join(directory, entry.name)), reason: "Symbolic link or non-regular file" });
+        continue;
+      }
+      if (!extension) {
+        skipped.push({ path: relative(root, join(directory, entry.name)), reason: "Unsupported file type" });
+        continue;
+      }
 
       const absolutePath = join(directory, entry.name);
       const fileStat = await stat(absolutePath);
-      if (fileStat.size > maxFileBytes) continue;
+      if (fileStat.size > maxFileBytes) {
+        skipped.push({ path: relative(root, absolutePath), reason: "Larger than 180 KB" });
+        continue;
+      }
 
       results.push({
         absolutePath,
@@ -99,7 +118,7 @@ async function collectSupportedFiles(root) {
   }
 
   await walk(root);
-  return results.sort((left, right) => left.path.localeCompare(right.path));
+  return { files: results.sort((left, right) => left.path.localeCompare(right.path)), skipped };
 }
 
 function getSupportedExtension(filename) {
@@ -475,18 +494,23 @@ function buildGeneratedTests(files) {
         title: `Starter test for ${fn.name}`,
         code: isPython
           ? [
+              "import pytest",
+              "",
+              "@pytest.mark.skip(reason='Adapt this starter with real inputs and assertions')",
               `def test_${fn.name}_handles_edge_input():`,
               "    # Arrange: import the function and build a boundary input",
               "    # Act: call the function",
               "    # Assert: verify the expected result or error path",
-              "    assert True"
+              "    raise NotImplementedError"
             ].join("\n")
           : [
-              `test('${fn.name} handles edge input', () => {`,
+              "import { test } from 'vitest';",
+              "",
+              `test.skip('${fn.name} handles edge input', () => {`,
               "  // Arrange: import the function and build a boundary input",
               "  // Act: call the function",
               "  // Assert: verify the expected result or error path",
-              "  expect(true).toBe(true);",
+              "  throw new Error('Implement real assertions before enabling this test');",
               "});"
             ].join("\n")
       };
@@ -533,7 +557,8 @@ function buildMarkdownReport(repository, summary, insights, files) {
   return [
     `# CodeArgus Review Summary for ${repository.owner}/${repository.name}`,
     "",
-    `Score: ${summary.score}/100`,
+    `Commit: ${repository.commitSha || "not recorded"}`,
+    `Heuristic score: ${summary.score}/100 (not a security guarantee or coverage measurement)`,
     `Files reviewed: ${summary.filesReviewed}`,
     `Findings: ${summary.findingsCount}`,
     "",

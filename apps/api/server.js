@@ -58,7 +58,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/reviews") {
-      return handleCreateReview(request, response);
+      return await handleCreateReview(request, response);
     }
 
     return serveStatic(url.pathname, response);
@@ -72,7 +72,7 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`CodeArgus running at http://${host}:${port}`);
+  console.log(`CodeArgus running at http://${host}:${server.address().port}`);
 });
 
 async function handleCreateReview(request, response) {
@@ -98,28 +98,43 @@ async function handleCreateReview(request, response) {
   const jobId = randomUUID();
   const workspace = join(tmpdir(), "code-review-agent", jobId);
   const startedAt = Date.now();
+  const streaming = request.headers.accept === "application/x-ndjson";
+  if (streaming) response.writeHead(200, { "Content-Type": "application/x-ndjson", "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no" });
+  const progress = (stage) => {
+    if (streaming) response.write(JSON.stringify({ type: "progress", stage }) + "\n");
+  };
+  const heartbeat = streaming ? setInterval(() => response.write("\n"), 15000) : null;
 
   try {
+    progress("Cloning repository");
     await cloneRepository(parsedRepo.cloneUrl, workspace);
+    const commitSha = (await runCommand("git", ["-C", workspace, "rev-parse", "HEAD"])).trim();
+    progress("Analyzing source files");
     const review = await analyzeRepository(workspace, {
       repository: {
         owner: parsedRepo.owner,
         name: parsedRepo.name,
-        url: parsedRepo.htmlUrl
+        url: parsedRepo.htmlUrl,
+        commitSha
       },
       startedAt
     });
 
     state.reviewsUsed += 1;
+    progress("Writing reviewer notes");
     await maybeAddGeminiReview(review, body, state);
     review.durationMs = Date.now() - startedAt;
-    return sendJson(response, 200, { review, limits: serializeLimits(state) });
+    const payload = { review, limits: serializeLimits(state) };
+    if (streaming) return response.end(JSON.stringify({ type: "result", ...payload }) + "\n");
+    return sendJson(response, 200, payload);
   } catch (error) {
+    if (streaming) return response.end(JSON.stringify({ type: "error", error: error.message, limits: serializeLimits(state) }) + "\n");
     return sendJson(response, 422, {
       error: error.message || "Could not review this repository.",
       limits: serializeLimits(state)
     });
   } finally {
+    clearInterval(heartbeat);
     await rm(workspace, { recursive: true, force: true });
   }
 }
@@ -251,6 +266,8 @@ function runCommand(command, args, options = {}) {
     });
 
     let stderr = "";
+    let stdout = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
       reject(new Error("Repository clone timed out. Try a smaller public repository."));
@@ -268,7 +285,7 @@ function runCommand(command, args, options = {}) {
     child.on("close", (code) => {
       clearTimeout(timer);
       if (code === 0) {
-        resolvePromise();
+        resolvePromise(stdout);
       } else {
         reject(new Error(cleanGitError(stderr)));
       }

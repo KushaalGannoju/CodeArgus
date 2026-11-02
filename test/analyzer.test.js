@@ -46,3 +46,21 @@ test("analyzes Python and JavaScript security findings", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("scope excludes checkpoint copies, symlinks, unsupported and oversized files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codeargus-scope-"));
+  try {
+    const { symlink } = await import("node:fs/promises");
+    await mkdir(join(root, ".ipynb_checkpoints"));
+    await writeFile(join(root, ".ipynb_checkpoints", "copy.js"), "eval(input)");
+    await writeFile(join(root, "app.js"), "function safe() { return 1; }");
+    await writeFile(join(root, "README.md"), "documentation");
+    await writeFile(join(root, "large.js"), "x".repeat(180001));
+    await symlink(join(root, "app.js"), join(root, "linked.js"));
+    const review = await analyzeRepository(root);
+    assert.deepEqual(review.files.map((file) => file.path), ["app.js"]);
+    assert.equal(review.summary.findingsCount, 0);
+    assert.equal(review.scope.skipped.length, 4);
+    assert.ok(review.scope.skipped.some((item) => item.reason.includes("180 KB")));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

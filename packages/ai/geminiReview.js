@@ -124,7 +124,7 @@ function buildPrompt(review) {
     "Be direct, natural, and specific. The overview should be 5-7 useful sentences with enough detail for a student to understand what to fix first.",
     "Avoid phrases like 'as an AI', 'it is important to note', 'delve', 'leverage', or 'potentially'.",
     "Return strict JSON with this shape:",
-    '{"headline":"short title","overview":"3-5 natural sentences","priorities":[{"title":"short","severity":"critical|high|medium|low","detail":"one practical sentence"}],"nextSteps":["short step","short step","short step"]}',
+    '{"headline":"short title","overview":"5-7 natural sentences","priorities":[{"title":"short","severity":"critical|high|medium|low","detail":"one practical sentence"}],"nextSteps":["short step","short step","short step"]}',
     JSON.stringify(compactReview)
   ].join("\n\n");
 }
@@ -177,7 +177,7 @@ async function callGemini({ apiKey, model, prompt }) {
     const text = await response.text();
     if (/API key not valid|API_KEY_INVALID|invalid api key/i.test(text)) {
       throw new Error(
-        "Gemini review skipped: the backend GEMINI_API_KEY is invalid. Copy the full key from Google AI Studio and update Railway."
+        "Gemini review skipped: the backend GEMINI_API_KEY is invalid. Update it in your backend host's environment settings."
       );
     }
     throw new Error(`Gemini review skipped: ${response.status} ${text.slice(0, 120)}`);

@@ -10,21 +10,21 @@
     <main class="app-shell">
       <header class="hero">
         <nav class="nav-row" aria-label="Project navigation">
-          <a class="brand-mark" href="https://github.com/KushaalGannoju/code-review-agent">
+          <a class="brand-mark" href="https://github.com/KushaalGannoju/CodeArgus">
             <img class="brand-logo" src="/assets/logo.jpg" alt="CodeArgus logo" />
             <span>CodeArgus</span>
           </a>
           <div class="nav-meta">
             <span>Python</span>
             <span>JavaScript</span>
-            <span>Gemini-ready</span>
+            <span id="connectionStatus" role="status">Connecting</span>
           </div>
         </nav>
 
         <section class="hero-grid">
           <div class="hero-copy">
             <p class="eyebrow">AI code review for student GitHub projects</p>
-            <h1>Catch bugs, risks, and weak tests before submission.</h1>
+            <h1>Review your repository.</h1>
             <p class="hero-lede">
               CodeArgus combines static analysis with Gemini reviewer notes to explain security,
               complexity, testing gaps, and refactoring priorities in plain language.
@@ -44,35 +44,49 @@
                   autocomplete="off"
                 />
                 <button id="reviewButton" type="submit">
-                  <span class="button-icon">Run</span>
                   <span>Review</span>
                 </button>
               </div>
               <p id="statusText" class="status-text" role="status">Ready for a public repository.</p>
+              <div class="console-actions">
+                <button id="retryConnection" type="button" class="secondary">Retry connection</button>
+                <button id="sampleButton" type="button" class="secondary">View example review</button>
+              </div>
             </form>
 
             <div class="limit-grid" aria-label="Session usage limits">
               <div>
                 <span>Reviews left</span>
-                <strong id="reviewsLeft">5</strong>
+                <strong id="reviewsLeft">&mdash;</strong>
               </div>
               <div>
                 <span>AI reviews left</span>
-                <strong id="aiLeft">3</strong>
+                <strong id="aiLeft">&mdash;</strong>
               </div>
               <div>
                 <span>Token budget</span>
-                <strong id="tokensLeft">12k</strong>
+                <strong id="tokensLeft">&mdash;</strong>
               </div>
             </div>
           </section>
         </section>
       </header>
 
+      <section id="historyArea" class="history-area" aria-label="Saved reviews">
+        <label for="historySelect">Recent reviews</label>
+        <select id="historySelect"><option value="">Choose a saved review</option></select>
+        <button id="clearHistory" type="button" class="secondary">Clear history</button>
+      </section>
+      <div id="results" hidden>
+      <div class="result-toolbar"><p id="repositoryMeta"></p><div class="toolbar-actions">
+        <button id="copyReport" type="button" class="secondary">Copy summary</button>
+        <button id="downloadMarkdown" type="button" class="secondary">Download Markdown</button>
+        <button id="downloadJson" type="button" class="secondary">Download JSON</button>
+      </div></div>
       <section class="summary-band" aria-label="Review summary">
         <div class="score-panel">
-          <span class="score-label">Score</span>
-          <strong id="scoreValue">0</strong>
+          <span class="score-label">Heuristic score</span>
+          <strong id="scoreValue">&mdash;</strong>
           <span id="scoreMeta">No review yet</span>
         </div>
         <div class="review-brief">
@@ -88,6 +102,7 @@
           <div id="nextStepsList" class="next-steps"></div>
         </div>
       </section>
+      <p class="score-disclaimer">Heuristic score based on detected findings and test-file presence. It is not a security guarantee or a test coverage measurement.</p>
 
       <section class="metrics-grid" aria-label="Review metrics">
         <div class="metric">
@@ -114,6 +129,8 @@
         <button class="tab-button" type="button" data-target="testsSection">Tests</button>
         <button class="tab-button" type="button" data-target="quizSection">Code Quiz</button>
         <button class="tab-button" type="button" data-target="reportSection">PR Summary</button>
+        <button class="tab-button" type="button" data-target="scopeSection">Review scope</button>
+        <button class="tab-button" type="button" data-target="comparisonSection">Compare</button>
       </nav>
 
       <section id="findingsSection" class="review-section is-active">
@@ -123,6 +140,7 @@
               <h2>Review Findings</h2>
               <p>Grounded in static analysis, then rewritten into practical guidance.</p>
             </div>
+            <div class="finding-controls"><input id="findingSearch" type="search" placeholder="Search findings or files" aria-label="Search findings or files" />
             <select id="severityFilter" aria-label="Filter findings by severity">
               <option value="all">All severities</option>
               <option value="critical">Critical</option>
@@ -130,13 +148,24 @@
               <option value="medium">Medium</option>
               <option value="low">Low</option>
             </select>
+            </div>
           </div>
+          <div id="severityCounts" class="severity-counts"></div>
           <div id="findingsList" class="findings-list empty-state">
             Run a review to see file-level issues here.
           </div>
         </div>
       </section>
-
+      <section id="scopeSection" class="review-section">
+        <h2>Review scope</h2><p id="scopeSummary"></p>
+        <div class="insight-grid"><div><h3>Reviewed files</h3><div id="reviewedFiles" class="compact-list"></div></div>
+        <div><h3>Skipped paths</h3><div id="skippedFiles" class="compact-list"></div></div></div>
+      </section>
+      <section id="comparisonSection" class="review-section">
+        <h2>Compare reviews</h2><label for="baselineSelect">Earlier review of this repository</label>
+        <select id="baselineSelect"><option value="">Select a baseline</option></select>
+        <div id="comparisonResult" class="comparison-result" aria-live="polite"></div>
+      </section>
       <section id="insightsSection" class="review-section">
         <div class="insight-grid">
           <div class="panel">
@@ -179,6 +208,7 @@
           <pre id="reportMarkdown" class="report-box">Run a review to generate a markdown summary.</pre>
         </div>
       </section>
+      </div>
     </main>
 
     <script src="/config.js"></script>
