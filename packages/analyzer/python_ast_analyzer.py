@@ -127,6 +127,7 @@ class PythonAnalyzer(ast.NodeVisitor):
             {
                 "name": node.name,
                 "line": node.lineno,
+                "endLine": node.end_lineno,
                 "complexity": complexity,
             }
         )
@@ -168,9 +169,14 @@ def estimate_complexity(node):
         ast.Match,
         ast.comprehension,
     )
-    for child in ast.walk(node):
-        if isinstance(child, branch_nodes):
-            complexity += 1
+    def count(child):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            return 0
+        own = (len(child.values) - 1) if isinstance(child, ast.BoolOp) else int(isinstance(child, branch_nodes))
+        return own + sum(count(item) for item in ast.iter_child_nodes(child))
+
+    for statement in node.body:
+        complexity += count(statement)
     return complexity
 
 

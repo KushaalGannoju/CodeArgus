@@ -17,3 +17,13 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-flash-latest
+      - key: SESSION_REVIEW_LIMIT
+        value: "10"
+      - key: SESSION_GEMINI_LIMIT
+        value: "10"
+      - key: SESSION_TOKEN_LIMIT
+        value: "150000"
+      - key: REVIEW_PROMPT_TOKEN_LIMIT
+        value: "8000"
+      - key: REVIEW_OUTPUT_TOKEN_LIMIT
+        value: "4500"

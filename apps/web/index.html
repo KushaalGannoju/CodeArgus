@@ -64,7 +64,7 @@
                 <strong id="aiLeft">&mdash;</strong>
               </div>
               <div>
-                <span>Token budget</span>
+                <span>AI tokens left</span>
                 <strong id="tokensLeft">&mdash;</strong>
               </div>
             </div>
@@ -103,6 +103,7 @@
         </div>
       </section>
       <p class="score-disclaimer">Heuristic score based on detected findings and test-file presence. It is not a security guarantee or a test coverage measurement.</p>
+      <details class="score-explainer"><summary>Why this score?</summary><div id="scoreBreakdown"></div></details>
 
       <section class="metrics-grid" aria-label="Review metrics">
         <div class="metric">
@@ -124,7 +125,8 @@
       </section>
 
       <nav class="section-tabs" aria-label="Review sections">
-        <button class="tab-button is-active" type="button" data-target="findingsSection">Findings</button>
+        <button class="tab-button is-active" type="button" data-target="narrativeSection">Full review</button>
+        <button class="tab-button" type="button" data-target="findingsSection">Findings</button>
         <button class="tab-button" type="button" data-target="insightsSection">Insights</button>
         <button class="tab-button" type="button" data-target="testsSection">Tests</button>
         <button class="tab-button" type="button" data-target="quizSection">Code Quiz</button>
@@ -133,7 +135,11 @@
         <button class="tab-button" type="button" data-target="comparisonSection">Compare</button>
       </nav>
 
-      <section id="findingsSection" class="review-section is-active">
+      <section id="narrativeSection" class="review-section is-active">
+        <div id="reviewDetails" class="review-details"></div>
+        <h2>Fix and validate</h2><ol id="actionPlan" class="action-plan"></ol>
+      </section>
+      <section id="findingsSection" class="review-section">
         <div class="panel findings-panel">
           <div class="panel-heading">
             <div>
@@ -148,9 +154,13 @@
               <option value="medium">Medium</option>
               <option value="low">Low</option>
             </select>
+            <select id="categoryFilter" aria-label="Filter by category"><option value="all">All categories</option><option value="security">Security</option><option value="correctness">Correctness</option><option value="maintainability">Maintainability</option></select>
+            <select id="fileFilter" aria-label="Filter by file"><option value="all">All files</option></select>
+            <select id="findingSort" aria-label="Sort findings"><option value="severity">Severity first</option><option value="file">File and line</option></select>
             </div>
           </div>
           <div id="severityCounts" class="severity-counts"></div>
+          <p id="matchingCount" class="section-copy" aria-live="polite"></p>
           <div id="findingsList" class="findings-list empty-state">
             Run a review to see file-level issues here.
           </div>
@@ -167,6 +177,8 @@
         <div id="comparisonResult" class="comparison-result" aria-live="polite"></div>
       </section>
       <section id="insightsSection" class="review-section">
+        <h2>File explorer</h2>
+        <div class="table-scroll"><table class="file-table"><thead><tr><th>File</th><th>Lines</th><th>Findings</th><th>Max complexity</th><th>Review</th></tr></thead><tbody id="fileHealthList"></tbody></table></div>
         <div class="insight-grid">
           <div class="panel">
             <h2>Language Mix</h2>

@@ -16,6 +16,15 @@ test("comparison ignores line shifts and counts duplicate occurrences", () => {
   assert.throws(() => compareReviews(before, after), /same repository/);
 });
 
+test("different scoring versions do not create a misleading improvement", () => {
+  const before = createExampleReview();
+  const after = structuredClone(before);
+  before.summary.scoring = { version: "1" };
+  after.summary.scoring = { version: "2" };
+  after.summary.score = 99;
+  assert.equal(compareReviews(before, after).scoreDelta, null);
+});
+
 test("source links pin commits, encode paths, and exclude illustrative fixtures", () => {
   const review = createExampleReview();
   assert.equal(sourceLink(review, "app.py"), null);

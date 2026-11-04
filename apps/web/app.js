@@ -57,6 +57,18 @@ $("#sampleButton").addEventListener("click", () => {
   statusText.textContent = "Illustrative example. No repository was fetched and no AI budget was used.";
 });
 $("#findingSearch").addEventListener("input", () => latestReview && renderFindings(latestReview));
+for (const selector of ["#categoryFilter", "#fileFilter", "#findingSort"]) $(selector).addEventListener("change", () => latestReview && renderFindings(latestReview));
+$("#fileHealthList").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-file]");
+  if (!button || !latestReview) return;
+  $("#fileFilter").value = button.dataset.file;
+  severityFilter.value = "all";
+  $("#categoryFilter").value = "all";
+  $("#findingSearch").value = "";
+  activateTab("findingsSection");
+  renderFindings(latestReview);
+  $("#findingsSection").scrollIntoView({ block: "start" });
+});
 $("#historySelect").addEventListener("change", (event) => {
   const saved = history.find((item) => item.id === event.target.value);
   if (saved && !busy) { latestReview = saved; renderReview(saved); statusText.textContent = "Saved review restored from this browser."; }
@@ -120,11 +132,14 @@ severityFilter.addEventListener("change", () => {
 
 tabButtons.forEach((button) => {
   button.addEventListener("click", () => {
-    const target = button.dataset.target;
-    tabButtons.forEach((item) => item.classList.toggle("is-active", item === button));
-    reviewSections.forEach((section) => section.classList.toggle("is-active", section.id === target));
+    activateTab(button.dataset.target);
   });
 });
+
+function activateTab(target) {
+  tabButtons.forEach((item) => { item.classList.toggle("is-active", item.dataset.target === target); item.setAttribute("aria-current", item.dataset.target === target ? "true" : "false"); });
+  reviewSections.forEach((section) => section.classList.toggle("is-active", section.id === target));
+}
 
 async function loadLimits() {
   if (connectionRequest) return connectionRequest;
@@ -182,6 +197,14 @@ function renderReview(review) {
   testsMetric.textContent = review.summary.testsDetected;
   providerBadge.textContent = review.narrative.providerLabel;
   reviewOverview.textContent = review.narrative.overview;
+  severityFilter.value = "all";
+  $("#categoryFilter").value = "all";
+  $("#findingSearch").value = "";
+  $("#fileFilter").innerHTML = '<option value="all">All files</option>' + review.files.map((file) => `<option value="${escapeHtml(file.path)}">${escapeHtml(file.path)}</option>`).join("");
+  activateTab("narrativeSection");
+  renderDetailedReview(review);
+  renderScoreBreakdown(review);
+  renderFileExplorer(review);
 
   renderPriorities(review.narrative.priorities);
   renderNextSteps(review.narrative.nextSteps);
@@ -191,7 +214,7 @@ function renderReview(review) {
   renderHotspots(review.insights?.complexityHotspots || []);
   renderGeneratedTests(review.generatedTests || []);
   renderQuiz(review.quiz);
-  reportMarkdown.textContent = review.reportMarkdown || "No markdown report generated.";
+  reportMarkdown.textContent = exportMarkdown(review);
   renderScope(review);
   renderComparisonOptions();
 }
@@ -225,11 +248,14 @@ function renderPriorities(priorities = []) {
 function renderFindings(review) {
   const severity = severityFilter.value;
   const query = $("#findingSearch").value.toLowerCase().trim();
+  const category = $("#categoryFilter").value;
+  const file = $("#fileFilter").value;
   const rank = { critical: 0, high: 1, medium: 2, low: 3 };
   const findings = flattenFindings(review)
-    .filter((finding) => (severity === "all" || finding.severity === severity) &&
+    .filter((finding) => (severity === "all" || finding.severity === severity) && (category === "all" || finding.category === category) && (file === "all" || finding.path === file) &&
       `${finding.path} ${finding.title} ${finding.message} ${finding.category} ${finding.recommendation}`.toLowerCase().includes(query))
-    .sort((a, b) => rank[a.severity] - rank[b.severity]);
+    .sort((a, b) => ($("#findingSort").value === "severity" ? rank[a.severity] - rank[b.severity] : 0) || a.path.localeCompare(b.path) || a.line - b.line);
+  $("#matchingCount").textContent = `${findings.length} of ${review.summary.findingsCount} findings shown`;
   $("#severityCounts").innerHTML = Object.entries(review.summary.severity).map(([level, count]) => `<span class="badge ${level}">${escapeHtml(level)} ${count}</span>`).join("");
 
   if (findings.length === 0) {
@@ -465,7 +491,7 @@ function fileReference(review, path, line = 1) {
 
 function renderScope(review) {
   const skipped = review.scope?.skipped || [];
-  $("#scopeSummary").textContent = `${review.files.length} files reviewed; ${skipped.length} paths skipped. Excluded directory contents are not traversed. Python uses AST analysis; JavaScript and TypeScript use pattern-based checks. Tests are detected, not executed.`;
+  $("#scopeSummary").textContent = `${review.files.length} files reviewed; ${skipped.length} paths skipped. Excluded directory contents are not traversed. Function complexity uses Python/Babel syntax trees; security rules use AST checks or patterns without whole-program data-flow analysis. Tests are detected, not executed.`;
   $("#reviewedFiles").innerHTML = review.files.map((file) => `<div class="compact-item">${fileReference(review, file.path)}<p>${escapeHtml(file.language)} / ${file.loc} non-empty lines</p></div>`).join("") || "No supported files found.";
   $("#skippedFiles").innerHTML = skipped.map((item) => `<div class="compact-item"><strong>${escapeHtml(item.path)}</strong><p>${escapeHtml(item.reason)}</p></div>`).join("") || "No skipped paths recorded.";
 }
@@ -506,7 +532,7 @@ function renderComparison() {
   const comparison = compareReviews(baseline, latestReview);
   const sha = (review) => review.repository.commitSha?.slice(0, 12) || "unknown";
   const scopeChanged = JSON.stringify(baseline.files.map((f) => f.path).sort()) !== JSON.stringify(latestReview.files.map((f) => f.path).sort());
-  $("#comparisonResult").innerHTML = `<p>${escapeHtml(sha(baseline))} &rarr; ${escapeHtml(sha(latestReview))} / Score change: ${comparison.scoreDelta > 0 ? "+" : ""}${comparison.scoreDelta}</p>
+  $("#comparisonResult").innerHTML = `<p>${escapeHtml(sha(baseline))} &rarr; ${escapeHtml(sha(latestReview))} / ${comparison.scoreDelta == null ? "Scoring methods differ; rerun both reviews before comparing scores." : `Score change: ${comparison.scoreDelta > 0 ? "+" : ""}${comparison.scoreDelta}`}</p>
     <p>${comparison.resolved.length} no longer detected / ${comparison.introduced.length} newly detected / ${comparison.unchanged.length} still detected</p>
     <p class="section-copy">Matches use file, rule title, category, and severity; line shifts are ignored. A missing finding does not prove a fix.${scopeChanged ? " The reviewed file set changed; missing files can affect these counts." : ""}${sha(baseline) === sha(latestReview) ? " Both reviews use the same commit." : ""}</p>` +
     [["No longer detected", comparison.resolved, baseline], ["Newly detected", comparison.introduced, latestReview], ["Still detected", comparison.unchanged, latestReview]].map(([title, findings, review]) => `<h3>${title}</h3>${findings.length ? findings.map((finding) => `<div class="compact-item"><strong>${escapeHtml(finding.title)}</strong>${fileReference(review, finding.path, finding.line)}</div>`).join("") : "<p>None.</p>"}`).join("");
@@ -515,7 +541,25 @@ function renderComparison() {
 function exportMarkdown(review) {
   const reviewed = review.files.map((file) => `- ${file.path} (${file.language})`).join("\n");
   const skipped = (review.scope?.skipped || []).map((item) => `- ${item.path}: ${item.reason}`).join("\n") || "- None recorded.";
-  return `${review.reportMarkdown}\n\n## Reviewer notes\n${review.narrative.overview}\n\n## Review scope\n${review.files.length} files reviewed; ${review.scope?.skipped?.length || 0} paths skipped. Tests were not executed.\n\n### Reviewed files\n${reviewed || "- None."}\n\n### Skipped paths\n${skipped}\n\nHeuristic score is not a security guarantee or test coverage measurement.\n`;
+  const details = (review.narrative.sections || []).map((section) => `### ${section.title}\n${section.body}`).join("\n\n");
+  const actions = (review.narrative.actionPlan || []).map((item, index) => `${index + 1}. ${item.title}: ${item.detail}\n   Validate: ${item.validation}\n   Files: ${item.files.join(", ")}`).join("\n\n");
+  const scoring = review.summary.scoring;
+  const breakdown = scoring ? `\n\n## Score breakdown (v${scoring.version})\n${scoring.breakdown.map((item) => `- ${item.category}: -${item.deduction} (cap ${item.cap})`).join("\n")}\n${scoring.note}` : "";
+  return `${review.reportMarkdown}\n\n## Reviewer notes\n${review.narrative.overview}\n\n${details}\n\n## Fix and validate\n${actions || "See next steps above."}${breakdown}\n\n## Review scope\n${review.files.length} files reviewed; ${review.scope?.skipped?.length || 0} paths skipped. Tests were not executed.\n\n### Reviewed files\n${reviewed || "- None."}\n\n### Skipped paths\n${skipped}\n\nHeuristic score is not a security guarantee or test coverage measurement.\n`;
+}
+
+function renderDetailedReview(review) {
+  $("#reviewDetails").innerHTML = (review.narrative.sections || []).map((section) => `<section class="review-detail"><h2>${escapeHtml(section.title)}</h2><p>${escapeHtml(section.body)}</p></section>`).join("") || '<p>This saved review predates the detailed report. Run a fresh review to get the full assessment.</p>';
+  $("#actionPlan").innerHTML = (review.narrative.actionPlan || []).map((item) => `<li><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.detail)}</p><p><strong>Validate:</strong> ${escapeHtml(item.validation)}</p><div>${item.files.map((path) => fileReference(review, path)).join(" / ")}</div></li>`).join("") || '<li>Follow the next steps in the summary and rerun your project tests.</li>';
+}
+
+function renderScoreBreakdown(review) {
+  const scoring = review.summary.scoring;
+  $("#scoreBreakdown").innerHTML = scoring ? `<p>Method v${escapeHtml(scoring.version)} / Start: ${scoring.base} / Rounded result: ${review.summary.score}</p><p>${escapeHtml(scoring.note)}</p>` + scoring.breakdown.map((item) => `<details><summary>${escapeHtml(item.category)}: &minus;${item.deduction} points (cap ${item.cap})</summary>${item.items.map((rule) => `<p>${fileReference(review, rule.path)} / ${escapeHtml(rule.title)} / ${rule.points} raw points / ${rule.occurrences} occurrence(s)</p>`).join("") || `<p>${item.category === "testing" ? "No detected test files costs 3 points total. Test presence does not measure coverage." : "No deductions in this category."}</p>`}</details>`).join("") : "The scoring breakdown was not recorded for this older review. Run a fresh review to see it.";
+}
+
+function renderFileExplorer(review) {
+  $("#fileHealthList").innerHTML = [...review.files].sort((a, b) => b.findings.length - a.findings.length).map((file) => `<tr><td>${fileReference(review, file.path)}<small>${escapeHtml(file.language)}${file.isTest ? " / test file" : ""}</small></td><td>${file.loc}</td><td>${file.findings.length}</td><td>${file.maxComplexity ?? "\u2014"}</td><td><button class="secondary" data-file="${escapeHtml(file.path)}" type="button">Findings</button></td></tr>`).join("");
 }
 
 function downloadReport(format) {

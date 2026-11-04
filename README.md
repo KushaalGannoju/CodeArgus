@@ -11,7 +11,7 @@ Repository: `KushaalGannoju/CodeArgus`
 - No login flow
 - Public GitHub repo URL review
 - Python AST analysis
-- JavaScript/TypeScript heuristic analysis
+- Babel AST function-complexity analysis for JavaScript/TypeScript, with pattern-based security rules
 - Security checks for secrets, unsafe dynamic execution, unsafe HTML injection, command injection, SQL injection, and unsafe deserialization
 - Complexity scoring
 - Duplicate code detection
@@ -33,12 +33,18 @@ Repository: `KushaalGannoju/CodeArgus`
 - Markdown/JSON exports and a clipboard summary
 - Explicit review scope with excluded paths and file-size/file-count limits
 - Browser-local history (8 reviews) and before/after comparisons by repository and commit
+- Detailed review sections with a fix-and-validation plan, included in report exports
+- Explainable category-based score deductions, file explorer, category/file filters, and finding sorting
 
 ## Review Scope and Comparisons
 
-Python analysis uses the standard-library AST parser. JavaScript/TypeScript checks are heuristic patterns, not full AST or runtime analysis. Generated directories such as `.ipynb_checkpoints`, dependencies, symlinks, unsupported files, and files over 180 KB are excluded. Up to 120 eligible files are reviewed in path order. The Scope tab lists reviewed files and skipped paths; excluded directories are listed once without scanning their contents.
+Python analysis uses the standard-library AST parser. JavaScript/TypeScript function complexity uses `@babel/parser` syntax trees and excludes nested functions from their parent's branch count. Security rules use Python AST checks or JavaScript patterns, without whole-program data-flow analysis. Generated directories such as `.ipynb_checkpoints`, dependencies, symlinks, unsupported files, and files over 180 KB are excluded. Up to 120 eligible files are reviewed in path order. The Scope tab lists reviewed files and skipped paths; excluded directories are listed once without scanning their contents. Duplicate source windows are consolidated per file pair, with original source line references.
 
 Scores are heuristic deductions for findings and test-file presence, not coverage percentages or security certification. Detected tests are not executed. Generated test starters are skipped until adapted with real inputs and assertions.
+
+Scoring method v2 starts at 100. Repeated occurrences of the same rule in one file count once at their highest severity. Security deductions use critical/high/medium/low weights of 12/8/3/1, capped at 60 points; correctness uses 10/6/2/0.5, capped at 25; maintainability uses 4/2/1/0.25, capped at 12. Missing test files cost a fixed 3 points, regardless of repository size. The final score is rounded. This allows a clean tested project to reach 100 and a lightly flagged project to remain above 90, while serious signals still lower the score. An empty review is unscored in the UI. Open "Why this score?" to see every contributing rule and cap. Comparisons across scoring versions suppress numeric score deltas; rerun older reviews for a fair comparison.
+
+The Full review view includes security/correctness, maintainability, testing/edge cases, and scope/confidence, followed by ordered fixes with validation checks. Gemini is asked for roughly 450-650 words where the evidence supports it. Input metadata is compacted to fit the prompt budget; no raw repository source is sent to Gemini. A structured static review is available if Gemini fails. The model's text remains advisory and can be inaccurate; verify file-level findings and validation steps.
 
 Each live review records the cloned HEAD commit. Review a repository, push fixes, and review it again. Open Compare and choose an earlier saved review. Matching uses path, rule title, category, and severity, ignoring line shifts and preserving duplicate counts. Missing findings can reflect changed scope or heuristics; they do not prove a fix. Renames are not tracked. History is stored only in this browser and can be cleared; raw normalized source lines are omitted from saved snapshots. No database or login is required.
 
@@ -47,6 +53,7 @@ The example is a labeled illustrative fixture, works without the backend, and co
 ## Run Locally
 
 ```bash
+npm ci
 npm run dev
 ```
 
@@ -80,13 +87,16 @@ Keep the key server-side only. Do not put it in `apps/web/config.js`, browser co
 The limits are intentionally lightweight and in-memory for V2:
 
 ```bash
-SESSION_REVIEW_LIMIT=5
-SESSION_GEMINI_LIMIT=3
-SESSION_TOKEN_LIMIT=12000
-REVIEW_PROMPT_TOKEN_LIMIT=4500
+SESSION_REVIEW_LIMIT=10
+SESSION_GEMINI_LIMIT=10
+SESSION_TOKEN_LIMIT=150000
+REVIEW_PROMPT_TOKEN_LIMIT=8000
+REVIEW_OUTPUT_TOKEN_LIMIT=4500
 ```
 
 These limits reset when the backend process restarts or when a user starts with a new browser session id. They are good enough for a resume/demo version, but not a production abuse-prevention system.
+
+AI reviews count attempted generations, including failures; static-only reviews do not spend an AI attempt. Token usage includes the provider's reported total (input, output, and thinking where applicable), with an estimate if metadata is missing. Responses that hit the output cap fall back to the static report and still count consumed tokens. A full input/output allowance is required before starting another generation. Only one review can run per session at a time. Google free-tier limits remain separate; increasing these demo allowances does not increase Google's quota or enable billing.
 
 ## Deployment
 
@@ -106,13 +116,16 @@ NODE_ENV=production
 GEMINI_API_KEY=your_key_here
 GEMINI_MODEL=gemini-flash-latest
 ALLOWED_ORIGINS=https://your-netlify-site.netlify.app
-SESSION_REVIEW_LIMIT=5
-SESSION_GEMINI_LIMIT=3
-SESSION_TOKEN_LIMIT=12000
-REVIEW_PROMPT_TOKEN_LIMIT=4500
+SESSION_REVIEW_LIMIT=10
+SESSION_GEMINI_LIMIT=10
+SESSION_TOKEN_LIMIT=150000
+REVIEW_PROMPT_TOKEN_LIMIT=8000
+REVIEW_OUTPUT_TOKEN_LIMIT=4500
 ```
 
 After deployment, open `https://YOUR-SERVICE.onrender.com/api/health` and confirm `{"ok":true}`. Copy the backend origin. Free instances may sleep and restart; the frontend waits up to 90 seconds for a connection and supports manual retry. The in-memory session budgets reset after server restarts. Free hosting and Gemini quotas still apply; this configuration does not guarantee unlimited availability.
+
+For an existing Render service, explicitly update all five limit variables above: existing environment values override new code defaults. Redeploy the backend and frontend to activate the new review structure and parser dependency. The Dockerfile now installs locked Node dependencies with `npm ci --omit=dev`.
 
 ### Frontend on Netlify
 

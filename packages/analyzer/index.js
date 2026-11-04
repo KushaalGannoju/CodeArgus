@@ -2,6 +2,8 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { parse } from "@babel/parser";
+import { calculateScore } from "./scoring.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const pythonAnalyzerPath = join(__dirname, "python_ast_analyzer.py");
@@ -61,6 +63,10 @@ export async function analyzeRepository(root, context = {}) {
 
   const summary = buildSummary(analyzedFiles);
   const insights = buildInsights(analyzedFiles, duplicateClusters);
+  for (const file of analyzedFiles) {
+    delete file.summary.normalizedLines;
+    delete file.summary.normalizedLineNumbers;
+  }
   return {
     id: cryptoRandomId(),
     repository,
@@ -158,7 +164,12 @@ function analyzePythonFile(file, source) {
 function analyzeJavaScriptFile(file, source) {
   const findings = [];
   const lines = source.split(/\r?\n/);
-  const functions = extractJavaScriptFunctions(source);
+  let functions = [];
+  try {
+    functions = extractJavaScriptFunctions(source, file.path);
+  } catch {
+    findings.push(finding({ title: "JavaScript/TypeScript file could not be parsed", severity: "medium", category: "correctness", line: 1, message: "Function analysis was unavailable for this syntax. Pattern-based security checks still ran.", recommendation: "Check syntax and parser support before interpreting this file's complexity results." }));
+  }
 
   scanCommonSecrets(source, findings);
   scanJavaScriptSecurity(lines, findings);
@@ -202,34 +213,29 @@ function baseFileResult(file, source, findings = []) {
   };
 }
 
-function extractJavaScriptFunctions(source) {
-  const lines = source.split(/\r?\n/);
+function extractJavaScriptFunctions(source, path) {
+  const ast = parse(source, { sourceType: "unambiguous", allowReturnOutsideFunction: true, plugins: [...(/\.tsx?$/.test(path) ? ["typescript"] : []), ...(/\.[jt]sx$|\.js$/.test(path) ? ["jsx"] : []), "decorators-legacy"], attachComment: false });
   const functions = [];
-  const patterns = [
-    /\bfunction\s+([A-Za-z_$][\w$]*)\s*\(/,
-    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>/,
-    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?[A-Za-z_$][\w$]*\s*=>/,
-    /^\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/
-  ];
-
-  lines.forEach((line, index) => {
-    const match = patterns.map((pattern) => line.match(pattern)).find(Boolean);
-    if (match) {
-      const block = lines.slice(index, Math.min(lines.length, index + 80)).join("\n");
-      functions.push({
-        name: match[1],
-        line: index + 1,
-        complexity: estimateComplexity(block)
-      });
+  const isFunction = (node) => /^(FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|ObjectMethod|ClassMethod|ClassPrivateMethod)$/.test(node.type);
+  const visit = (node, parent) => {
+    if (isFunction(node) && node.body) {
+      let complexity = 1;
+      const count = (child) => {
+        if (isFunction(child) || /Class(Declaration|Expression)/.test(child.type)) return;
+        if (/^(IfStatement|ForStatement|ForInStatement|ForOfStatement|WhileStatement|DoWhileStatement|CatchClause|ConditionalExpression|LogicalExpression)$/.test(child.type) || (child.type === "SwitchCase" && child.test)) complexity += 1;
+        children(child).forEach(count);
+      };
+      count(node.body);
+      functions.push({ name: node.id?.name || node.key?.name || parent?.id?.name || parent?.key?.name || `anonymous@${node.loc.start.line}`, line: node.loc.start.line, endLine: node.loc.end.line, complexity });
     }
-  });
-
+    children(node).forEach((child) => visit(child, node));
+  };
+  visit(ast);
   return functions;
 }
 
-function estimateComplexity(source) {
-  const keywords = source.match(/\b(if|for|while|case|catch|switch)\b|\?\s*|&&|\|\|/g) || [];
-  return 1 + keywords.length;
+function children(node) {
+  return Object.values(node).flatMap((value) => Array.isArray(value) ? value : [value]).filter((value) => value && typeof value === "object" && typeof value.type === "string");
 }
 
 function extractJavaScriptImports(source) {
@@ -341,19 +347,22 @@ function detectDuplicateCode(files) {
 
       if (seen.has(chunk)) {
         const first = seen.get(chunk);
+        if (first.path === file.path && index - first.index < 6) continue;
+        if (duplicates.some((item) => item.path === file.path && item.originalPath === first.path)) continue;
         duplicates.push({
           path: file.path,
+          originalPath: first.path,
           finding: finding({
             title: "Duplicate code block",
             severity: "medium",
             category: "maintainability",
-            line: index + 1,
+            line: file.summary.normalizedLineNumbers[index],
             message: `This block looks similar to code in ${first.path}:${first.line}.`,
             recommendation: "Extract the repeated logic into a shared helper or module."
           })
         });
       } else {
-        seen.set(chunk, { path: file.path, line: index + 1 });
+        seen.set(chunk, { path: file.path, line: file.summary.normalizedLineNumbers[index], index });
       }
     }
   }
@@ -362,16 +371,14 @@ function detectDuplicateCode(files) {
 }
 
 function summarizeFile(file, source, functions, findings) {
-  const normalizedLines = source
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("//") && !line.startsWith("#"));
+  const lines = source.split(/\r?\n/).map((line, index) => ({ text: line.trim(), line: index + 1 })).filter((item) => item.text && !item.text.startsWith("//") && !item.text.startsWith("#"));
 
   return {
     purpose: inferPurpose(file.path, functions),
     findingCount: findings.length,
     functionCount: functions.length,
-    normalizedLines
+    normalizedLines: lines.map((item) => item.text),
+    normalizedLineNumbers: lines.map((item) => item.line)
   };
 }
 
@@ -399,19 +406,8 @@ function buildSummary(files) {
     }
   }
 
-  const score = clamp(
-    100 -
-      severity.critical * 14 -
-      severity.high * 9 -
-      severity.medium * 4 -
-      severity.low * 1 -
-      Math.max(0, files.filter((file) => !file.isTest).length - testsDetected) * 1,
-    0,
-    100
-  );
-
   return {
-    score,
+    ...calculateScore(files),
     filesReviewed: files.length,
     findingsCount,
     severity,
@@ -607,10 +603,6 @@ function finding({ title, severity, category, line, message, recommendation }) {
 
 function isTestFile(path) {
   return /(^|\/)(tests?|__tests__)(\/|$)|\.(test|spec)\.[jt]sx?$|test_.*\.py$|.*_test\.py$/.test(path);
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
 }
 
 function cryptoRandomId() {

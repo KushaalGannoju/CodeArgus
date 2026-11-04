@@ -719,6 +719,24 @@ h1 {
 }
 
 [hidden] { display: none !important; }
+.review-details { max-width: 920px; }
+.review-detail { padding: 18px 0; border-bottom: 1px solid var(--line); }
+.review-detail p, .action-plan p { line-height: 1.75; color: #3b5066; white-space: pre-line; margin-bottom: 10px; }
+.review-detail, .action-plan li, #scoreBreakdown { overflow-wrap: anywhere; }
+.action-plan { max-width: 920px; padding-left: 24px; }
+.action-plan li { padding: 8px 0 20px 8px; }
+.action-plan a, .file-table a, .score-explainer a { color: #076a9b; text-decoration: underline; overflow-wrap: anywhere; }
+.score-explainer { border-bottom: 1px solid var(--line); padding: 12px 0; font-size: .88rem; line-height: 1.65; }
+summary { cursor: pointer; font-weight: 650; }
+#scoreBreakdown details { padding: 8px 12px; }
+.finding-controls { justify-content: flex-end; max-width: 700px; }
+.finding-controls select { max-width: 230px; }
+#matchingCount { margin-bottom: 14px; }
+.table-scroll { width: 100%; overflow-x: auto; margin-bottom: 24px; }
+.file-table { width: 100%; border-collapse: collapse; font-size: .88rem; text-align: left; }
+.file-table th { font-weight: 650; background: #edf3f5; }
+.file-table td, .file-table th { padding: 12px; border-bottom: 1px solid var(--line); }
+.file-table small { display: block; color: var(--muted); margin-top: 5px; }
 * { min-width: 0; letter-spacing: 0; }
 :focus-visible { outline: 3px solid #087e93; outline-offset: 3px; }
 a.finding-path, .finding-path a, .compact-item a { color: #076a9b; text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }

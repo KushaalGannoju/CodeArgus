@@ -47,6 +47,37 @@ test("analyzes Python and JavaScript security findings", async () => {
   }
 });
 
+test("function complexity is bounded by real JS/TS and Python function scopes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codeargus-complexity-"));
+  try {
+    await writeFile(join(root, "example.tsx"), `const simple = (input: string) => input;\nfunction outer() { function nested(x: number) { if (x) return 1; return 0; } return nested(1); }\nfunction busy(x: number) { ${Array.from({length: 14}, () => "if (x) x--;").join(" ")} return <div>{x}</div>; }`);
+    await writeFile(join(root, "example.py"), "def outer():\n    def inner(x):\n        if x:\n            return 1\n        return 0\n    return inner(1)\n");
+    const review = await analyzeRepository(root);
+    const ts = review.files.find((item) => item.path.endsWith("tsx"));
+    assert.equal(ts.functions.find((item) => item.name === "simple").complexity, 1);
+    assert.equal(ts.functions.find((item) => item.name === "outer").complexity, 1);
+    assert.equal(ts.functions.find((item) => item.name === "nested").complexity, 2);
+    assert.equal(ts.functions.find((item) => item.name === "busy").complexity, 15);
+    const py = review.files.find((item) => item.path.endsWith("py"));
+    assert.equal(py.functions.find((item) => item.name === "outer").complexity, 1);
+    assert.equal(py.functions.find((item) => item.name === "inner").complexity, 2);
+    assert.equal(ts.summary.normalizedLines, undefined);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("overlapping duplicate windows produce one finding with an actual source line", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codeargus-duplicate-"));
+  try {
+    const block = Array.from({length: 12}, (_, i) => `const lengthyVariable${i} = processValue(${i});`).join("\n");
+    await writeFile(join(root, "a.js"), block);
+    await writeFile(join(root, "b.js"), "// file comment\n\n" + block);
+    const review = await analyzeRepository(root);
+    const duplicates = review.files.flatMap((item) => item.findings).filter((item) => item.title === "Duplicate code block");
+    assert.equal(duplicates.length, 1);
+    assert.equal(duplicates[0].line, 3);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("scope excludes checkpoint copies, symlinks, unsupported and oversized files", async () => {
   const root = await mkdtemp(join(tmpdir(), "codeargus-scope-"));
   try {

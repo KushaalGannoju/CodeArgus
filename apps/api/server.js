@@ -23,10 +23,11 @@ const allowedOrigins = String(
   .map((origin) => normalizeOrigin(origin.trim()))
   .filter(Boolean);
 const limitsConfig = {
-  reviews: Number(process.env.SESSION_REVIEW_LIMIT || 5),
-  gemini: Number(process.env.SESSION_GEMINI_LIMIT || 3),
-  tokens: Number(process.env.SESSION_TOKEN_LIMIT || 12000),
-  promptTokens: Number(process.env.REVIEW_PROMPT_TOKEN_LIMIT || 4500)
+  reviews: Number(process.env.SESSION_REVIEW_LIMIT || 10),
+  gemini: Number(process.env.SESSION_GEMINI_LIMIT || 10),
+  tokens: Number(process.env.SESSION_TOKEN_LIMIT || 150000),
+  promptTokens: Number(process.env.REVIEW_PROMPT_TOKEN_LIMIT || 8000),
+  outputTokens: Number(process.env.REVIEW_OUTPUT_TOKEN_LIMIT || 4500)
 };
 const sessions = new Map();
 
@@ -81,6 +82,7 @@ async function handleCreateReview(request, response) {
   const parsedRepo = parseGitHubUrl(repoUrl);
   const state = getSessionState(request);
 
+  if (state.busy) return sendJson(response, 409, { error: "A review is already running in this session.", limits: serializeLimits(state) });
   if (!parsedRepo) {
     return sendJson(response, 400, {
       error: "Enter a valid GitHub repository URL like https://github.com/owner/repo.",
@@ -96,6 +98,7 @@ async function handleCreateReview(request, response) {
   }
 
   const jobId = randomUUID();
+  state.busy = true;
   const workspace = join(tmpdir(), "code-review-agent", jobId);
   const startedAt = Date.now();
   const streaming = request.headers.accept === "application/x-ndjson";
@@ -134,6 +137,7 @@ async function handleCreateReview(request, response) {
       limits: serializeLimits(state)
     });
   } finally {
+    state.busy = false;
     clearInterval(heartbeat);
     await rm(workspace, { recursive: true, force: true });
   }
@@ -141,21 +145,19 @@ async function handleCreateReview(request, response) {
 
 async function maybeAddGeminiReview(review, body, state) {
   const wantsGemini = body.useGemini !== false;
-  const hasGeminiBudget =
-    state.geminiUsed < limitsConfig.gemini && state.tokensUsed < limitsConfig.tokens;
+  const remaining = limitsConfig.tokens - state.tokensUsed;
+  const hasGeminiBudget = state.geminiUsed < limitsConfig.gemini && remaining >= limitsConfig.promptTokens + limitsConfig.outputTokens;
   const enhanced = await enrichReviewWithGemini(review, {
     enabled: wantsGemini && hasGeminiBudget,
     apiKey: process.env.GEMINI_API_KEY,
     model: process.env.GEMINI_MODEL || "gemini-flash-latest",
-    promptTokenLimit: Math.min(
-      limitsConfig.promptTokens,
-      Math.max(0, limitsConfig.tokens - state.tokensUsed)
-    )
+    promptTokenLimit: limitsConfig.promptTokens,
+    outputTokenLimit: limitsConfig.outputTokens
   });
 
-  if (enhanced.ai.used) {
+  if (enhanced.ai.attempted) {
     state.geminiUsed += 1;
-    state.tokensUsed += enhanced.ai.estimatedInputTokens;
+    state.tokensUsed += enhanced.ai.tokensUsed;
   }
 
   if (wantsGemini && !hasGeminiBudget) {
